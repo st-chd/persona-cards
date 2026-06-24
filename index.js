@@ -193,7 +193,8 @@ function personaDocument(includeConnections) {
         position: descriptor.position ?? 0,
         depth: descriptor.depth ?? 2,
         role: descriptor.role ?? 0,
-        lorebook: descriptor.lorebook ?? '',
+        lorebook: includeConnections ? (descriptor.lorebook ?? '') : '',
+        lorebook_included: includeConnections,
         connections_included: includeConnections,
         connections: includeConnections
             ? (descriptor.connections ?? []).map(connection => ({
@@ -324,7 +325,7 @@ function createPreview(card, format, imageUrl) {
         [s.name, card.data.name],
         [s.title, card.data.title || s.none],
         [s.description, truncatePreviewText(card.data.description) || s.none],
-        [s.lorebook, card.data.lorebook || s.none],
+        [s.lorebook, card.data.lorebook_included ? (card.data.lorebook || s.none) : s.connectionsNotIncluded],
         [s.connections, connectionPreview(card)],
         [s.format, format.toUpperCase()],
     ];
@@ -443,7 +444,9 @@ async function applyImport(card, imageBlob) {
     }
 
     const existingDescriptor = power_user.persona_descriptions[avatarId] ?? {};
-    const lorebook = resolveLorebook(card.data.lorebook, overwrite, existingDescriptor);
+    const lorebook = card.data.lorebook_included
+        ? resolveLorebook(card.data.lorebook, overwrite, existingDescriptor)
+        : { value: overwrite ? (existingDescriptor.lorebook ?? '') : '', warning: '' };
     const connectionResolution = resolveImportedConnections(card);
     const importedConnections = connectionResolution.resolved.map(item => item.connection);
     let finalConnections = overwrite ? (existingDescriptor.connections ?? []) : [];

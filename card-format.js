@@ -1,7 +1,7 @@
 export const PERSONA_CARD_SPEC = 'sillytavern_persona';
-export const PERSONA_CARD_VERSION = '1.1';
+export const PERSONA_CARD_VERSION = '1.2';
 
-const SUPPORTED_VERSIONS = new Set(['1.0', '1.1']);
+const SUPPORTED_VERSIONS = new Set(['1.0', '1.1', '1.2']);
 
 const PNG_KEYWORD = 'st_persona';
 const PNG_SIGNATURE = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -169,7 +169,7 @@ export function createPersonaCard(data) {
 /**
  * Validates and normalizes a persona card document.
  * @param {unknown} value Parsed card value
- * @returns {{spec:string, spec_version:string, data:{avatar_id:string,name:string,description:string,title:string,position:number,depth:number,role:number,lorebook:string,connections_included:boolean,connections:Array<object>}}}
+ * @returns {{spec:string, spec_version:string, data:{avatar_id:string,name:string,description:string,title:string,position:number,depth:number,role:number,lorebook:string,lorebook_included:boolean,connections_included:boolean,connections:Array<object>}}}
  */
 export function validatePersonaCard(value) {
     if (!value || typeof value !== 'object') throw new Error('INVALID_CARD');
@@ -186,6 +186,13 @@ export function validatePersonaCard(value) {
     const depth = Number(source.depth);
     const role = Number(source.role);
     const connectionsIncluded = value.spec_version !== '1.0' && source.connections_included === true;
+    // Version 1.0 predates optional connection data. In 1.1 the existing
+    // connections flag represented the export checkbox, including lorebook data.
+    const lorebookIncluded = value.spec_version === '1.0'
+        ? true
+        : value.spec_version === '1.1'
+            ? connectionsIncluded
+            : source.lorebook_included === true;
 
     return {
         spec: PERSONA_CARD_SPEC,
@@ -198,7 +205,8 @@ export function validatePersonaCard(value) {
             position: VALID_POSITIONS.has(position) ? position : 0,
             depth: Number.isInteger(depth) && depth >= 0 && depth <= 9999 ? depth : 2,
             role: VALID_ROLES.has(role) ? role : 0,
-            lorebook: stringField(source.lorebook).trim(),
+            lorebook: lorebookIncluded ? stringField(source.lorebook).trim() : '',
+            lorebook_included: lorebookIncluded,
             connections_included: connectionsIncluded,
             connections: connectionsIncluded ? normalizeConnections(source.connections) : [],
         },
