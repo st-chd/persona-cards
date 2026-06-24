@@ -1,0 +1,67 @@
+.persona-cards-controls {
+    display: contents;
+}
+
+.persona-cards-button {
+    min-width: 2.25em;
+}
+
+#persona-cards-export {
+    min-width: unset;
+}
+
+/* Keep the Current Persona action icons together. If the row is too narrow,
+   let the optional settings dropdown wrap as a unit instead of orphaning the
+   final action icon on a second line. */
+#persona_controls .persona_controls_buttons_block {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+}
+
+#persona_controls > label[for="persona-management-dropdown"] {
+    min-width: 100px;
+    flex: 1 1 100px;
+}
+
+.persona-cards-preview {
+    display: grid;
+    grid-template-columns: minmax(110px, 28%) minmax(0, 1fr);
+    gap: 1rem;
+    text-align: left;
+}
+
+.persona-cards-preview > img {
+    width: 100%;
+    max-height: 280px;
+    object-fit: contain;
+    border-radius: 8px;
+}
+
+.persona-cards-preview dl {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 0.45rem 0.8rem;
+    margin: 0;
+    min-width: 0;
+}
+
+.persona-cards-preview dt {
+    font-weight: 700;
+}
+
+.persona-cards-preview dd {
+    margin: 0;
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+    .persona-cards-preview {
+        grid-template-columns: 1fr;
+    }
+
+    .persona-cards-preview > img {
+        max-height: 220px;
+    }
+}
