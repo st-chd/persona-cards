@@ -580,7 +580,7 @@ function createControls() {
         if (file) await importPersona(file);
     });
 
-    const importButton = createButton('fa-file-import', s.importTitle, () => fileInput.click());
+    const importButton = createButton('fa-id-card-clip', s.importTitle, () => fileInput.click());
     controls.append(importButton, fileInput);
     anchor.after(controls);
 
