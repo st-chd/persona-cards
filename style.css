@@ -23,6 +23,16 @@
     flex: 1 1 100px;
 }
 
+.persona-cards-export-connections {
+    margin-top: 0.75rem;
+}
+
+.persona-cards-export-help {
+    display: block;
+    margin: 0.25rem 0 0 1.75rem;
+    text-align: left;
+}
+
 .persona-cards-preview {
     display: grid;
     grid-template-columns: minmax(110px, 28%) minmax(0, 1fr);

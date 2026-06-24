@@ -32,8 +32,9 @@ const STRINGS = {
         noPersona: 'Select a persona before exporting.',
         chooseFormat: 'Choose an export format.',
         includeConnections: 'Include character and group connections',
-        png: 'PNG (image and persona data)',
-        json: 'JSON (persona data only)',
+        connectionExportHelp: 'Exports the characters and lorebook connected to this persona.',
+        png: 'Save as PNG',
+        json: 'Save as JSON',
         name: 'Name',
         title: 'Title',
         description: 'Description',
@@ -76,8 +77,9 @@ const STRINGS = {
         noPersona: '내보낼 페르소나를 먼저 선택하세요.',
         chooseFormat: '내보낼 형식을 선택하세요.',
         includeConnections: '캐릭터 및 그룹 연결 정보 포함',
-        png: 'PNG (이미지와 페르소나 정보)',
-        json: 'JSON (페르소나 정보만)',
+        connectionExportHelp: '페르소나와 연결 된 캐릭터, 연결된 로어북 정보를 같이 내보내기합니다.',
+        png: 'PNG로 저장',
+        json: 'JSON로 저장',
         name: '이름',
         title: '제목',
         description: '설명',
@@ -205,14 +207,27 @@ function personaDocument(includeConnections) {
 
 async function chooseExportFormat() {
     const s = strings();
-    const popup = new Popup(s.chooseFormat, POPUP_TYPE.TEXT, null, {
+    const content = document.createElement('div');
+    const prompt = document.createElement('p');
+    prompt.textContent = s.chooseFormat;
+
+    const checkboxLabel = document.createElement('label');
+    checkboxLabel.className = 'checkbox_label persona-cards-export-connections';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = true;
+    const checkboxText = document.createElement('span');
+    checkboxText.textContent = s.includeConnections;
+    checkboxLabel.append(checkbox, checkboxText);
+
+    const help = document.createElement('small');
+    help.className = 'persona-cards-export-help text_muted';
+    help.textContent = s.connectionExportHelp;
+    content.append(prompt, checkboxLabel, help);
+
+    const popup = new Popup(content, POPUP_TYPE.TEXT, null, {
         okButton: false,
         cancelButton: s.cancel,
-        customInputs: [{
-            id: 'include_connections',
-            label: s.includeConnections,
-            defaultState: true,
-        }],
         customButtons: [
             { text: s.png, icon: 'fa-image', result: POPUP_RESULT.CUSTOM1 },
             { text: s.json, icon: 'fa-file-code', result: POPUP_RESULT.CUSTOM2 },
@@ -222,7 +237,7 @@ async function chooseExportFormat() {
     if (format === POPUP_RESULT.CANCELLED) return null;
     return {
         format,
-        includeConnections: popup.inputResults?.get('include_connections') === true,
+        includeConnections: checkbox.checked,
     };
 }
 
