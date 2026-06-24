@@ -51,22 +51,17 @@ function uint32Bytes(value) {
     return bytes;
 }
 
-function bytesToBase64(bytes) {
-    let binary = '';
-    const blockSize = 0x8000;
-    for (let offset = 0; offset < bytes.length; offset += blockSize) {
-        binary += String.fromCharCode(...bytes.subarray(offset, offset + blockSize));
-    }
-    return btoa(binary);
-}
-
-function bytesToAscii(bytes) {
+function bytesToString(bytes) {
     let value = '';
     const blockSize = 0x8000;
     for (let offset = 0; offset < bytes.length; offset += blockSize) {
         value += String.fromCharCode(...bytes.subarray(offset, offset + blockSize));
     }
     return value;
+}
+
+function bytesToBase64(bytes) {
+    return btoa(bytesToString(bytes));
 }
 
 function base64ToBytes(value) {
@@ -130,14 +125,14 @@ function decodeTextChunk(chunk) {
     }
     if (separator < 1) return null;
 
-    const keyword = bytesToAscii(chunk.data.subarray(0, separator));
+    const keyword = bytesToString(chunk.data.subarray(0, separator));
     if (keyword !== PNG_KEYWORD) return null;
     if (chunk.data.length > MAX_METADATA_BYTES) throw new Error('METADATA_TOO_LARGE');
 
     const actualCrc = crc32(concatBytes([chunk.typeBytes, chunk.data]));
     if (actualCrc !== chunk.storedCrc) throw new Error('INVALID_METADATA');
 
-    const encodedJson = bytesToAscii(chunk.data.subarray(separator + 1));
+    const encodedJson = bytesToString(chunk.data.subarray(separator + 1));
     const jsonBytes = base64ToBytes(encodedJson);
     if (jsonBytes.length > MAX_METADATA_BYTES) throw new Error('METADATA_TOO_LARGE');
     return new TextDecoder().decode(jsonBytes);

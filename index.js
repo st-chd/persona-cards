@@ -22,6 +22,7 @@ import {
 } from './card-format.js';
 
 const EXTENSION_ID = 'persona-cards';
+const EXPORT_CONTROL_ID = `${EXTENSION_ID}-export`;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
 const STRINGS = {
@@ -33,7 +34,6 @@ const STRINGS = {
         includeConnections: 'Include character and group connections',
         png: 'PNG (image and persona data)',
         json: 'JSON (persona data only)',
-        previewTitle: 'Import persona',
         name: 'Name',
         title: 'Title',
         description: 'Description',
@@ -50,6 +50,7 @@ const STRINGS = {
         cancel: 'Cancel',
         conflictTitle: 'Persona already exists',
         conflictText: 'A persona with the same internal ID already exists. Choose how to continue.',
+        avatarConflictText: 'An unassigned avatar with the same internal ID already exists. Overwrite it or create a copy.',
         overwrite: 'Overwrite',
         copy: 'Create copy',
         connectionsTitle: 'Apply imported connections',
@@ -66,7 +67,6 @@ const STRINGS = {
         unsupportedVersion: 'This persona card version is not supported.',
         fileTooLarge: 'The selected file is too large.',
         exportFailed: 'Could not export the persona card.',
-        importFailed: 'Could not import the persona card.',
         loreMissingNew: name => `Lorebook "${name}" was not found (importing without a connection).`,
         loreMissingOverwrite: name => `Lorebook "${name}" was not found (keeping the existing connection).`,
     },
@@ -78,7 +78,6 @@ const STRINGS = {
         includeConnections: '캐릭터 및 그룹 연결 정보 포함',
         png: 'PNG (이미지와 페르소나 정보)',
         json: 'JSON (페르소나 정보만)',
-        previewTitle: '페르소나 가져오기',
         name: '이름',
         title: '제목',
         description: '설명',
@@ -95,6 +94,7 @@ const STRINGS = {
         cancel: '취소',
         conflictTitle: '같은 페르소나가 이미 있음',
         conflictText: '동일한 내부 ID를 가진 페르소나가 있습니다. 처리 방법을 선택하세요.',
+        avatarConflictText: '동일한 내부 ID를 가진 미등록 아바타가 있습니다. 덮어쓰거나 복사본을 생성하세요.',
         overwrite: '덮어쓰기',
         copy: '복사본 생성',
         connectionsTitle: '가져온 연결 정보 적용',
@@ -111,7 +111,6 @@ const STRINGS = {
         unsupportedVersion: '지원하지 않는 페르소나 카드 버전입니다.',
         fileTooLarge: '선택한 파일이 너무 큽니다.',
         exportFailed: '페르소나 카드를 내보내지 못했습니다.',
-        importFailed: '페르소나 카드를 가져오지 못했습니다.',
         loreMissingNew: name => `로어북 "${name}"을(를) 찾을 수 없음 (연결 없이 가져옵니다).`,
         loreMissingOverwrite: name => `로어북 "${name}"을(를) 찾을 수 없음 (기존 연결을 유지합니다).`,
     },
@@ -332,9 +331,9 @@ async function confirmPreview(card, format, imageUrl) {
     return await popup.show() === POPUP_RESULT.AFFIRMATIVE;
 }
 
-async function chooseConflictAction() {
+async function chooseConflictAction(hasPersona) {
     const s = strings();
-    return await Popup.show.text(s.conflictTitle, s.conflictText, {
+    return await Popup.show.text(s.conflictTitle, hasPersona ? s.conflictText : s.avatarConflictText, {
         okButton: false,
         cancelButton: s.cancel,
         customButtons: [
@@ -378,7 +377,10 @@ async function uploadAvatar(blob, avatarId) {
         cache: 'no-cache',
         body: form,
     });
-    if (!response.ok) throw new Error(`Avatar upload failed: ${response.status}`);
+    if (!response.ok) {
+        const responseBody = (await response.text().catch(() => '')).trim().slice(0, 300);
+        throw new Error(`Avatar upload failed: ${response.status}${responseBody ? ` ${responseBody}` : ''}`);
+    }
 
     await fetch(getUserAvatar(avatarId), { cache: 'reload' });
     await fetch(getThumbnailUrl('persona', avatarId), { cache: 'reload' });
@@ -404,13 +406,16 @@ async function applyImport(card, imageBlob) {
     const s = strings();
     let avatarId = safeImportedAvatarId(card.data.avatar_id, card.data.name);
     let overwrite = Object.hasOwn(power_user.personas, avatarId);
+    const avatarIds = await getUserAvatars(false);
+    let avatarExists = avatarIds.includes(avatarId);
 
-    if (overwrite) {
-        const action = await chooseConflictAction();
+    if (overwrite || avatarExists) {
+        const action = await chooseConflictAction(overwrite);
         if (action === POPUP_RESULT.CANCELLED) return;
         if (action === POPUP_RESULT.CUSTOM2) {
             avatarId = createAvatarId(card.data.name);
             overwrite = false;
+            avatarExists = false;
         } else if (action !== POPUP_RESULT.CUSTOM1) {
             return;
         }
@@ -440,7 +445,7 @@ async function applyImport(card, imageBlob) {
 
     if (imageBlob) {
         await uploadAvatar(imageBlob, avatarId);
-    } else if (!overwrite) {
+    } else if (!overwrite && !avatarExists) {
         await uploadAvatar(await defaultAvatarBlob(), avatarId);
     }
 
@@ -475,13 +480,22 @@ async function applyImport(card, imageBlob) {
         await eventSource.emit(event_types.PERSONA_UPDATED, avatarId);
     } else {
         await initPersona(avatarId, card.data.name, card.data.description, card.data.title, {
+            silent: true,
             position: card.data.position,
             depth: card.data.depth,
             role: card.data.role,
             lorebook: lorebook.value,
         });
-        power_user.persona_descriptions[avatarId].connections = finalConnections;
+        const descriptor = power_user.persona_descriptions[avatarId];
+        if (!descriptor) throw new Error('Persona initialization did not create a descriptor');
+        descriptor.connections = finalConnections;
         saveSettingsDebounced();
+        await eventSource.emit(event_types.PERSONA_CREATED, {
+            avatarId,
+            name: card.data.name,
+            description: card.data.description,
+            title: card.data.title,
+        });
     }
 
     await getUserAvatars(true, avatarId);
@@ -571,7 +585,7 @@ function createControls() {
     anchor.after(controls);
 
     exportControl = createButton('fa-file-export', s.exportTitle, exportPersona);
-    exportControl.id = `${EXTENSION_ID}-export`;
+    exportControl.id = EXPORT_CONTROL_ID;
     exportAnchor.before(exportControl);
 }
 
