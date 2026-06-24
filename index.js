@@ -303,6 +303,12 @@ function connectionPreview(card) {
         .join('\n');
 }
 
+function truncatePreviewText(value, maxLength = 240) {
+    const text = String(value || '');
+    if (text.length <= maxLength) return text;
+    return `${text.slice(0, maxLength).trimEnd()}...`;
+}
+
 function createPreview(card, format, imageUrl) {
     const s = strings();
     const element = document.createElement('div');
@@ -317,7 +323,7 @@ function createPreview(card, format, imageUrl) {
     const rows = [
         [s.name, card.data.name],
         [s.title, card.data.title || s.none],
-        [s.description, card.data.description || s.none],
+        [s.description, truncatePreviewText(card.data.description) || s.none],
         [s.lorebook, card.data.lorebook || s.none],
         [s.connections, connectionPreview(card)],
         [s.format, format.toUpperCase()],
