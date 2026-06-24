@@ -77,7 +77,7 @@ const STRINGS = {
         noPersona: '내보낼 페르소나를 먼저 선택하세요.',
         chooseFormat: '내보낼 형식을 선택하세요.',
         includeConnections: '캐릭터 및 그룹 연결 정보 포함',
-        connectionExportHelp: '페르소나와 연결 된 캐릭터, 연결된 로어북 정보를 같이 내보내기합니다.',
+        connectionExportHelp: '페르소나와 연결 된 캐릭터, 로어북 정보를 같이 내보내기합니다.',
         png: 'PNG로 저장',
         json: 'JSON로 저장',
         name: '이름',
