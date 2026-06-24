@@ -54,11 +54,10 @@ const STRINGS = {
         avatarConflictText: 'An unassigned avatar with the same internal ID already exists. Overwrite it or create a copy.',
         overwrite: 'Overwrite',
         copy: 'Create copy',
-        connectionsTitle: 'Apply imported connections',
-        connectionsText: 'Choose how to handle this persona\'s existing connections.',
-        keepConnections: 'Keep existing',
-        replaceConnections: 'Replace',
-        mergeConnections: 'Merge',
+        connectionsTitle: 'Apply connection settings',
+        connectionsText: '<p>Choose how to handle this persona\'s connection settings.</p><div><strong>Keep existing settings</strong>: Keeps the current connection settings.</div><div><strong>Import settings</strong>: Replaces them with the imported connection settings.</div>',
+        keepConnections: 'Keep existing settings',
+        replaceConnections: 'Import settings',
         missingConnections: count => `${count} imported connection(s) could not be found and were skipped.`,
         imported: 'Persona imported successfully.',
         overwritten: 'Persona overwritten successfully.',
@@ -99,11 +98,10 @@ const STRINGS = {
         avatarConflictText: '동일한 내부 ID를 가진 미등록 아바타가 있습니다. 덮어쓰거나 복사본을 생성하세요.',
         overwrite: '덮어쓰기',
         copy: '복사본 생성',
-        connectionsTitle: '가져온 연결 정보 적용',
-        connectionsText: '기존 페르소나의 연결 정보를 어떻게 처리할지 선택하세요.',
-        keepConnections: '기존 연결 유지',
-        replaceConnections: '가져온 연결로 교체',
-        mergeConnections: '연결 합치기',
+        connectionsTitle: '연결 설정 적용',
+        connectionsText: '<p>페르소나의 연결 정보를 어떻게 처리할지 선택하세요.</p><div><strong>기존 설정 유지</strong>: 기존 연결 설정을 유지합니다.</div><div><strong>가져온 설정으로 교체</strong>: 가져온 연결 설정으로 교체합니다.</div>',
+        keepConnections: '기존 설정 유지',
+        replaceConnections: '가져온 설정으로 교체',
         missingConnections: count => `가져온 연결 ${count}개를 찾을 수 없어 건너뛰었습니다.`,
         imported: '페르소나를 가져왔습니다.',
         overwritten: '페르소나를 덮어썼습니다.',
@@ -373,18 +371,8 @@ async function chooseConnectionAction() {
         customButtons: [
             { text: s.keepConnections, icon: 'fa-shield', result: POPUP_RESULT.CUSTOM1 },
             { text: s.replaceConnections, icon: 'fa-rotate', result: POPUP_RESULT.CUSTOM2 },
-            { text: s.mergeConnections, icon: 'fa-code-merge', result: POPUP_RESULT.CUSTOM3 },
         ],
     });
-}
-
-function mergeConnections(existing, imported) {
-    const merged = [...existing];
-    for (const connection of imported) {
-        const duplicate = merged.some(item => item.type === connection.type && String(item.id) === String(connection.id));
-        if (!duplicate) merged.push(connection);
-    }
-    return merged;
 }
 
 async function uploadAvatar(blob, avatarId) {
@@ -446,19 +434,18 @@ async function applyImport(card, imageBlob) {
     const existingDescriptor = power_user.persona_descriptions[avatarId] ?? {};
     const lorebook = card.data.lorebook_included
         ? resolveLorebook(card.data.lorebook, overwrite, existingDescriptor)
-        : { value: overwrite ? (existingDescriptor.lorebook ?? '') : '', warning: '' };
+        : { value: '', warning: '' };
     const connectionResolution = resolveImportedConnections(card);
     const importedConnections = connectionResolution.resolved.map(item => item.connection);
-    let finalConnections = overwrite ? (existingDescriptor.connections ?? []) : [];
+    let finalConnections = [];
 
     if (card.data.connections_included) {
         if (overwrite) {
+            finalConnections = existingDescriptor.connections ?? [];
             const connectionAction = await chooseConnectionAction();
             if (connectionAction === POPUP_RESULT.CANCELLED) return;
             if (connectionAction === POPUP_RESULT.CUSTOM2) {
                 finalConnections = importedConnections;
-            } else if (connectionAction === POPUP_RESULT.CUSTOM3) {
-                finalConnections = mergeConnections(finalConnections, importedConnections);
             } else if (connectionAction !== POPUP_RESULT.CUSTOM1) {
                 return;
             }
