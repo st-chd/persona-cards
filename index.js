@@ -1,10 +1,14 @@
 import {
     characters,
+    chat_metadata,
     default_user_avatar,
     eventSource,
     event_types,
+    getCurrentChatId,
     getRequestHeaders,
     getThumbnailUrl,
+    name2,
+    saveMetadata,
     saveSettingsDebounced,
     setUserName,
 } from '../../../../script.js';
@@ -24,6 +28,8 @@ import {
 const EXTENSION_ID = 'persona-cards';
 const EXPORT_CONTROL_ID = `${EXTENSION_ID}-export`;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
+const SAFE_AVATAR_EXTENSIONS = new Set(['.png', '.webp', '.gif', '.jpg', '.jpeg']);
+const FALLBACK_AVATAR_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 
 const STRINGS = {
     en: {
@@ -31,8 +37,8 @@ const STRINGS = {
         importTitle: 'Import a persona card',
         noPersona: 'Select a persona before exporting.',
         chooseFormat: 'Choose an export format.',
-        includeConnections: 'Include character and group connections',
-        connectionExportHelp: 'Exports the characters and lorebook connected to this persona.',
+        includeConnections: 'Include chat, character, and group connections',
+        connectionExportHelp: 'Exports the chat lock, characters, and lorebook connected to this persona.',
         png: 'Save as PNG',
         json: 'Save as JSON',
         name: 'Name',
@@ -67,6 +73,9 @@ const STRINGS = {
         unsupportedVersion: 'This persona card version is not supported.',
         fileTooLarge: 'The selected file is too large.',
         exportFailed: 'Could not export the persona card.',
+        exportPngRequiresPng: 'PNG export requires a PNG avatar. Use JSON export for this persona, or convert the avatar to PNG first.',
+        chatLockSkipped: 'The imported chat lock was not applied because no chat is currently open.',
+        avatarPlaceholderSkipped: 'No avatar image was embedded. The original non-PNG avatar ID was preserved, but no placeholder avatar was uploaded.',
         loreMissingNew: name => `Lorebook "${name}" was not found (importing without a connection).`,
         loreMissingOverwrite: name => `Lorebook "${name}" was not found (keeping the existing connection).`,
     },
@@ -76,9 +85,9 @@ const STRINGS = {
         noPersona: '내보낼 페르소나를 먼저 선택하세요.',
         chooseFormat: '내보낼 형식을 선택하세요.',
         includeConnections: '캐릭터 및 그룹 연결 정보 포함',
-        connectionExportHelp: '페르소나와 연결 된 캐릭터, 로어북 정보를 같이 내보내기합니다.',
-        png: 'PNG로 저장',
-        json: 'JSON로 저장',
+        connectionExportHelp: '페르소나와 연결된 채팅 잠금, 캐릭터, 로어북 정보를 같이 내보내기합니다.',
+        png: 'PNG 저장',
+        json: 'JSON 저장',
         name: '이름',
         title: '제목',
         description: '설명',
@@ -116,6 +125,12 @@ const STRINGS = {
     },
 };
 
+Object.assign(STRINGS.ko, {
+    exportPngRequiresPng: '\uC544\uBC14\uD0C0\uAC00 PNG\uC77C \uB54C\uB9CC PNG\uB85C \uB0B4\uBCF4\uB0BC \uC218 \uC788\uC2B5\uB2C8\uB2E4. JSON\uC73C\uB85C \uB0B4\uBCF4\uB0B4\uAC70\uB098 \uC544\uBC14\uD0C0\uB97C PNG\uB85C \uBCC0\uD658\uD574 \uC8FC\uC138\uC694.',
+    chatLockSkipped: '\uD604\uC7AC \uC5F4\uB9B0 \uCC44\uD305\uC774 \uC5C6\uC5B4 \uAC00\uC838\uC628 \uCC44\uD305 \uC7A0\uAE08\uC744 \uC801\uC6A9\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.',
+    avatarPlaceholderSkipped: '\uD3EC\uD568\uB41C \uC544\uBC14\uD0C0 \uC774\uBBF8\uC9C0\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4. \uAE30\uC874 non-PNG \uC544\uBC14\uD0C0 ID\uB294 \uC720\uC9C0\uD588\uC9C0\uB9CC, \uB300\uCCB4 \uC544\uBC14\uD0C0\uB294 \uC5C5\uB85C\uB4DC\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.',
+});
+
 let controls = null;
 let exportControl = null;
 
@@ -148,10 +163,15 @@ function createAvatarId(name) {
     return candidate;
 }
 
+function avatarExtension(id) {
+    const match = String(id || '').toLowerCase().match(/\.[a-z0-9]+$/);
+    return match?.[0] ?? '';
+}
+
 function safeImportedAvatarId(value, name) {
     const id = String(value || '').trim();
     const hasInvalidCharacters = /[<>:"/\\|?*\u0000-\u001F]/.test(id);
-    if (!id || id.length > 240 || hasInvalidCharacters || !id.toLowerCase().endsWith('.png')) {
+    if (!id || id.length > 240 || hasInvalidCharacters || !SAFE_AVATAR_EXTENSIONS.has(avatarExtension(id))) {
         return createAvatarId(name);
     }
     return id;
@@ -178,10 +198,16 @@ function getConnectionName(connection) {
     return '';
 }
 
+function chatLabel() {
+    return getCurrentLocale().startsWith('ko') ? '채팅' : 'Chat';
+}
+
 function personaDocument(includeConnections) {
     const name = power_user.personas[user_avatar];
     if (!user_avatar || !name) return null;
     const descriptor = power_user.persona_descriptions[user_avatar] ?? {};
+    const chatId = getCurrentChatId();
+    const isLockedToCurrentChat = chat_metadata.persona === user_avatar && !!chatId;
 
     return createPersonaCard({
         avatar_id: user_avatar,
@@ -201,6 +227,10 @@ function personaDocument(includeConnections) {
                 name: getConnectionName(connection),
             }))
             : [],
+        chat_lock_included: includeConnections && isLockedToCurrentChat,
+        chat_lock: includeConnections && isLockedToCurrentChat
+            ? { id: String(chatId), name: name2 || String(chatId) }
+            : null,
     });
 }
 
@@ -265,7 +295,11 @@ async function exportPersona() {
         }
     } catch (error) {
         console.error('[Persona Cards] Export failed', error);
-        toastr.error(s.exportFailed, 'Persona Cards');
+        if (error instanceof Error && error.message === 'NOT_PNG') {
+            toastr.error(s.exportPngRequiresPng ?? STRINGS.en.exportPngRequiresPng, 'Persona Cards');
+        } else {
+            toastr.error(s.exportFailed, 'Persona Cards');
+        }
     }
 }
 
@@ -287,25 +321,68 @@ function resolveImportedConnections(card) {
     return { resolved, unresolved };
 }
 
-function connectionPreview(card) {
-    const s = strings();
-    if (!card.data.connections_included) return s.connectionsNotIncluded;
-    if (!card.data.connections.length) return s.none;
-
-    const { resolved, unresolved } = resolveImportedConnections(card);
-    return [...resolved.map(item => ({ ...item, found: true })), ...unresolved.map(item => ({ ...item, found: false }))]
-        .map(item => {
-            const type = item.connection.type === 'character' ? s.connectionCharacter : s.connectionGroup;
-            const status = item.found ? s.connectionFound : s.connectionMissing;
-            return `${type}: ${item.name} (${status})`;
-        })
-        .join('\n');
+function createIcon(className, title) {
+    const icon = document.createElement('i');
+    icon.className = `fa-solid fa-fw ${className}`;
+    icon.title = title;
+    icon.setAttribute('aria-label', title);
+    return icon;
 }
 
-function truncatePreviewText(value, maxLength = 240) {
-    const text = String(value || '');
-    if (text.length <= maxLength) return text;
-    return `${text.slice(0, maxLength).trimEnd()}...`;
+function createConnectionPreview(card) {
+    const s = strings();
+
+    if (!card.data.chat_lock_included && (!card.data.connections_included || !card.data.connections.length)) return null;
+
+    const container = document.createElement('div');
+    container.className = 'persona-cards-connections';
+
+    if (card.data.chat_lock_included) {
+        const hasOpenChat = !!getCurrentChatId();
+        const row = document.createElement('div');
+        row.className = 'persona-cards-connection';
+        row.classList.toggle('persona-cards-connection-missing', !hasOpenChat);
+
+        const name = document.createElement('span');
+        name.className = 'persona-cards-connection-name';
+        name.textContent = card.data.chat_lock?.name || card.data.chat_lock?.id || chatLabel();
+
+        row.append(
+            createIcon('fa-message', chatLabel()),
+            name,
+            createIcon(hasOpenChat ? 'fa-link' : 'fa-link-slash', hasOpenChat ? s.connectionFound : s.connectionMissing),
+        );
+        container.append(row);
+    }
+
+    if (!card.data.connections_included || !card.data.connections.length) return container;
+
+    const { resolved, unresolved } = resolveImportedConnections(card);
+    const connections = [...resolved.map(item => ({ ...item, found: true })), ...unresolved.map(item => ({ ...item, found: false }))];
+
+    for (const item of connections) {
+        const row = document.createElement('div');
+        row.className = 'persona-cards-connection';
+        row.classList.toggle('persona-cards-connection-missing', !item.found);
+
+        const typeTitle = item.connection.type === 'character' ? s.connectionCharacter : s.connectionGroup;
+        const typeIcon = item.connection.type === 'character' ? 'fa-user' : 'fa-users';
+        const statusTitle = item.found ? s.connectionFound : s.connectionMissing;
+        const statusIcon = item.found ? 'fa-link' : 'fa-link-slash';
+
+        const name = document.createElement('span');
+        name.className = 'persona-cards-connection-name';
+        name.textContent = item.name;
+
+        row.append(
+            createIcon(typeIcon, typeTitle),
+            name,
+            createIcon(statusIcon, statusTitle),
+        );
+        container.append(row);
+    }
+
+    return container;
 }
 
 function createPreview(card, format, imageUrl) {
@@ -320,19 +397,26 @@ function createPreview(card, format, imageUrl) {
 
     const details = document.createElement('dl');
     const rows = [
-        [s.name, card.data.name],
-        [s.title, card.data.title || s.none],
-        [s.description, truncatePreviewText(card.data.description) || s.none],
-        [s.lorebook, card.data.lorebook_included ? (card.data.lorebook || s.none) : s.connectionsNotIncluded],
-        [s.connections, connectionPreview(card)],
-        [s.format, format.toUpperCase()],
+        { label: s.name, value: card.data.name },
+        { label: s.title, value: card.data.title, hidden: !card.data.title },
+        { label: s.description, value: card.data.description, className: 'persona-cards-description', hidden: !card.data.description },
+        { label: s.lorebook, value: card.data.lorebook, hidden: !card.data.lorebook_included || !card.data.lorebook },
+        { label: s.connections, value: createConnectionPreview(card), className: 'persona-cards-connections-row' },
+        { label: s.format, value: format.toUpperCase() },
     ];
 
-    for (const [label, value] of rows) {
+    for (const { label, value, className, hidden } of rows) {
+        if (hidden || value === null || value === undefined || value === '') continue;
+
         const term = document.createElement('dt');
         term.textContent = label;
         const description = document.createElement('dd');
-        description.textContent = value;
+        if (className) description.classList.add(className);
+        if (value instanceof Node) {
+            description.append(value);
+        } else {
+            description.textContent = value;
+        }
         details.append(term, description);
     }
 
@@ -376,7 +460,9 @@ async function chooseConnectionAction() {
 }
 
 async function uploadAvatar(blob, avatarId) {
-    const file = new File([blob], 'avatar.png', { type: 'image/png' });
+    const type = blob.type || 'image/png';
+    const extension = avatarExtension(avatarId) || (type === 'image/webp' ? '.webp' : type === 'image/gif' ? '.gif' : type === 'image/jpeg' ? '.jpg' : '.png');
+    const file = new File([blob], `avatar${extension}`, { type });
     const form = new FormData();
     form.append('avatar', file);
     form.append('overwrite_name', avatarId);
@@ -400,6 +486,27 @@ async function defaultAvatarBlob() {
     const response = await fetch(default_user_avatar);
     if (!response.ok) throw new Error(`Default avatar request failed: ${response.status}`);
     return await response.blob();
+}
+
+async function uploadDefaultAvatar(avatarId) {
+    if (avatarExtension(avatarId) !== '.png') {
+        const s = strings();
+        console.warn(`[Persona Cards] Skipping placeholder upload for non-PNG avatar ID: ${avatarId}`);
+        toastr.warning(s.avatarPlaceholderSkipped ?? STRINGS.en.avatarPlaceholderSkipped, 'Persona Cards', { timeOut: 8000 });
+        return;
+    }
+
+    try {
+        await uploadAvatar(await defaultAvatarBlob(), avatarId);
+    } catch (error) {
+        console.warn('[Persona Cards] Default avatar upload failed; using bundled placeholder avatar.', error);
+        try {
+            const bytes = Uint8Array.from(atob(FALLBACK_AVATAR_PNG), char => char.charCodeAt(0));
+            await uploadAvatar(new Blob([bytes], { type: 'image/png' }), avatarId);
+        } catch (fallbackError) {
+            console.warn('[Persona Cards] Bundled placeholder avatar upload failed; continuing with persona metadata only.', fallbackError);
+        }
+    }
 }
 
 function resolveLorebook(importedName, overwrite, existingDescriptor) {
@@ -438,26 +545,29 @@ async function applyImport(card, imageBlob) {
     const connectionResolution = resolveImportedConnections(card);
     const importedConnections = connectionResolution.resolved.map(item => item.connection);
     let finalConnections = [];
+    let applyChatLock = false;
 
-    if (card.data.connections_included) {
+    if (card.data.connections_included || card.data.chat_lock_included) {
         if (overwrite) {
             finalConnections = existingDescriptor.connections ?? [];
             const connectionAction = await chooseConnectionAction();
             if (connectionAction === POPUP_RESULT.CANCELLED) return;
             if (connectionAction === POPUP_RESULT.CUSTOM2) {
                 finalConnections = importedConnections;
+                applyChatLock = card.data.chat_lock_included;
             } else if (connectionAction !== POPUP_RESULT.CUSTOM1) {
                 return;
             }
         } else {
             finalConnections = importedConnections;
+            applyChatLock = card.data.chat_lock_included;
         }
     }
 
     if (imageBlob) {
         await uploadAvatar(imageBlob, avatarId);
     } else if (!overwrite && !avatarExists) {
-        await uploadAvatar(await defaultAvatarBlob(), avatarId);
+        await uploadDefaultAvatar(avatarId);
     }
 
     if (overwrite) {
@@ -507,6 +617,15 @@ async function applyImport(card, imageBlob) {
             description: card.data.description,
             title: card.data.title,
         });
+    }
+
+    if (applyChatLock) {
+        if (getCurrentChatId()) {
+            chat_metadata.persona = avatarId;
+            await saveMetadata();
+        } else {
+            toastr.warning(s.chatLockSkipped ?? STRINGS.en.chatLockSkipped, 'Persona Cards', { timeOut: 8000 });
+        }
     }
 
     await getUserAvatars(true, avatarId);

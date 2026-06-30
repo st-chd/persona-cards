@@ -1,7 +1,7 @@
 export const PERSONA_CARD_SPEC = 'sillytavern_persona';
-export const PERSONA_CARD_VERSION = '1.2';
+export const PERSONA_CARD_VERSION = '1.3';
 
-const SUPPORTED_VERSIONS = new Set(['1.0', '1.1', '1.2']);
+const SUPPORTED_VERSIONS = new Set(['1.0', '1.1', '1.2', '1.3']);
 
 const PNG_KEYWORD = 'st_persona';
 const PNG_SIGNATURE = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -138,6 +138,14 @@ function decodeTextChunk(chunk) {
     return new TextDecoder().decode(jsonBytes);
 }
 
+function safeDecodeTextChunk(chunk) {
+    try {
+        return decodeTextChunk(chunk);
+    } catch {
+        return null;
+    }
+}
+
 function stringField(value, fallback = '') {
     return typeof value === 'string' ? value : fallback;
 }
@@ -151,6 +159,14 @@ function normalizeConnections(value) {
         if (!type || !id) return [];
         return [{ type, id, name: stringField(connection.name).trim() }];
     });
+}
+
+function normalizeChatLock(value) {
+    if (!value || typeof value !== 'object') return null;
+    const id = stringField(value.id).trim();
+    const name = stringField(value.name).trim();
+    if (!id && !name) return null;
+    return { id, name };
 }
 
 /**
@@ -169,7 +185,7 @@ export function createPersonaCard(data) {
 /**
  * Validates and normalizes a persona card document.
  * @param {unknown} value Parsed card value
- * @returns {{spec:string, spec_version:string, data:{avatar_id:string,name:string,description:string,title:string,position:number,depth:number,role:number,lorebook:string,lorebook_included:boolean,connections_included:boolean,connections:Array<object>}}}
+ * @returns {{spec:string, spec_version:string, data:{avatar_id:string,name:string,description:string,title:string,position:number,depth:number,role:number,lorebook:string,lorebook_included:boolean,connections_included:boolean,connections:Array<object>,chat_lock_included:boolean,chat_lock:{id:string,name:string}|null}}}
  */
 export function validatePersonaCard(value) {
     if (!value || typeof value !== 'object') throw new Error('INVALID_CARD');
@@ -186,6 +202,7 @@ export function validatePersonaCard(value) {
     const depth = Number(source.depth);
     const role = Number(source.role);
     const connectionsIncluded = value.spec_version !== '1.0' && source.connections_included === true;
+    const chatLockIncluded = value.spec_version === '1.3' && source.chat_lock_included === true;
     // Version 1.0 predates optional connection data. In 1.1 the existing
     // connections flag represented the export checkbox, including lorebook data.
     const lorebookIncluded = value.spec_version === '1.0'
@@ -196,6 +213,8 @@ export function validatePersonaCard(value) {
 
     return {
         spec: PERSONA_CARD_SPEC,
+        // Cards are migrated to the current writer version after legacy fields
+        // are interpreted using the input spec_version above.
         spec_version: PERSONA_CARD_VERSION,
         data: {
             avatar_id: avatarId,
@@ -209,6 +228,8 @@ export function validatePersonaCard(value) {
             lorebook_included: lorebookIncluded,
             connections_included: connectionsIncluded,
             connections: connectionsIncluded ? normalizeConnections(source.connections) : [],
+            chat_lock_included: chatLockIncluded,
+            chat_lock: chatLockIncluded ? normalizeChatLock(source.chat_lock) : null,
         },
     };
 }
@@ -232,7 +253,7 @@ export function embedPersonaCardInPng(png, card) {
     const output = [PNG_SIGNATURE];
 
     for (const chunk of chunks) {
-        const isPersonaChunk = chunk.type === 'tEXt' && decodeTextChunk(chunk) !== null;
+        const isPersonaChunk = chunk.type === 'tEXt' && safeDecodeTextChunk(chunk) !== null;
         if (isPersonaChunk) continue;
         if (chunk.type === 'IEND') output.push(personaChunk);
         output.push(chunk.raw);
@@ -253,7 +274,7 @@ export function extractPersonaCardFromPng(png) {
 
     for (const chunk of chunks) {
         if (chunk.type !== 'tEXt') continue;
-        const decoded = decodeTextChunk(chunk);
+        const decoded = safeDecodeTextChunk(chunk);
         if (decoded !== null) json = decoded;
     }
 

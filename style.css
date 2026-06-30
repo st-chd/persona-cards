@@ -66,6 +66,77 @@
     overflow-wrap: anywhere;
 }
 
+.persona-cards-preview dd.persona-cards-description {
+    max-height: 12rem;
+    overflow: auto;
+    scrollbar-color: var(--grey7070a) transparent;
+}
+
+.persona-cards-preview dd.persona-cards-description::-webkit-scrollbar {
+    width: 0.7rem;
+}
+
+.persona-cards-preview dd.persona-cards-description::-webkit-scrollbar-track:hover {
+    background-color: rgba(126, 126, 126, 0.2);
+}
+
+.persona-cards-preview dd.persona-cards-description::-webkit-scrollbar-thumb:vertical {
+    background-color: var(--grey7070a);
+    box-shadow: inset 0 0 0 1px var(--black50a);
+    border-radius: 10px;
+    background-clip: content-box;
+    border: 2px solid transparent;
+    min-height: 40px;
+}
+
+.persona-cards-connections {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.persona-cards-connection {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.persona-cards-connection-missing {
+    color: #c98282;
+    color: color-mix(in srgb, var(--warning) 58%, var(--SmartThemeBodyColor));
+}
+
+.persona-cards-connection i {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1em;
+    height: 1em;
+    line-height: 1;
+    vertical-align: middle;
+}
+
+.persona-cards-connection .fa-link {
+    color: var(--SmartThemeQuoteColor);
+}
+
+.persona-cards-connection .fa-link,
+.persona-cards-connection .fa-link-slash {
+    font-size: 0.8em;
+}
+
+.persona-cards-connection .fa-link-slash {
+    opacity: 0.55;
+}
+
+.persona-cards-connection-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 @media (max-width: 600px) {
     .persona-cards-preview {
         grid-template-columns: 1fr;
