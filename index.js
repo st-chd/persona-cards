@@ -14,6 +14,7 @@ import {
 } from '../../../../script.js';
 import { groups } from '../../../group-chats.js';
 import { getCurrentLocale } from '../../../i18n.js';
+import { MacrosParser } from '../../../macros.js';
 import { getUserAvatar, getUserAvatars, initPersona, setPersonaDescription, user_avatar } from '../../../personas.js';
 import { POPUP_RESULT, POPUP_TYPE, Popup } from '../../../popup.js';
 import { power_user } from '../../../power-user.js';
@@ -27,6 +28,7 @@ import {
 
 const EXTENSION_ID = 'persona-cards';
 const EXPORT_CONTROL_ID = `${EXTENSION_ID}-export`;
+const USER_AVATAR_MACRO = 'user_avatar';
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const SAFE_AVATAR_EXTENSIONS = new Set(['.png', '.webp', '.gif', '.jpg', '.jpeg']);
 const FALLBACK_AVATAR_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
@@ -50,8 +52,7 @@ const STRINGS = {
         connectionGroup: 'Group',
         connectionFound: 'found',
         connectionMissing: 'not found',
-        connectionsNotIncluded: 'Not included',
-        none: 'None',
+        chat: 'Chat',
         format: 'Format',
         import: 'Import',
         cancel: 'Cancel',
@@ -75,6 +76,7 @@ const STRINGS = {
         exportFailed: 'Could not export the persona card.',
         exportPngRequiresPng: 'PNG export requires a PNG avatar. Use JSON export for this persona, or convert the avatar to PNG first.',
         chatLockSkipped: 'The imported chat lock was not applied because no chat is currently open.',
+        chatLockImportNote: 'On import, this chat lock is applied to the currently open chat.',
         avatarPlaceholderSkipped: 'No avatar image was embedded. The original non-PNG avatar ID was preserved, but no placeholder avatar was uploaded.',
         loreMissingNew: name => `Lorebook "${name}" was not found (importing without a connection).`,
         loreMissingOverwrite: name => `Lorebook "${name}" was not found (keeping the existing connection).`,
@@ -97,8 +99,7 @@ const STRINGS = {
         connectionGroup: '그룹',
         connectionFound: '찾음',
         connectionMissing: '찾을 수 없음',
-        connectionsNotIncluded: '포함되지 않음',
-        none: '없음',
+        chat: '채팅',
         format: '형식',
         import: '가져오기',
         cancel: '취소',
@@ -128,11 +129,83 @@ const STRINGS = {
 Object.assign(STRINGS.ko, {
     exportPngRequiresPng: '\uC544\uBC14\uD0C0\uAC00 PNG\uC77C \uB54C\uB9CC PNG\uB85C \uB0B4\uBCF4\uB0BC \uC218 \uC788\uC2B5\uB2C8\uB2E4. JSON\uC73C\uB85C \uB0B4\uBCF4\uB0B4\uAC70\uB098 \uC544\uBC14\uD0C0\uB97C PNG\uB85C \uBCC0\uD658\uD574 \uC8FC\uC138\uC694.',
     chatLockSkipped: '\uD604\uC7AC \uC5F4\uB9B0 \uCC44\uD305\uC774 \uC5C6\uC5B4 \uAC00\uC838\uC628 \uCC44\uD305 \uC7A0\uAE08\uC744 \uC801\uC6A9\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.',
+    chatLockImportNote: '\uAC00\uC838\uC624\uAE30 \uC2DC \uC774 \uCC44\uD305 \uC7A0\uAE08\uC740 \uD604\uC7AC \uC5F4\uB824 \uC788\uB294 \uCC44\uD305\uC5D0 \uC801\uC6A9\uB429\uB2C8\uB2E4.',
     avatarPlaceholderSkipped: '\uD3EC\uD568\uB41C \uC544\uBC14\uD0C0 \uC774\uBBF8\uC9C0\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4. \uAE30\uC874 non-PNG \uC544\uBC14\uD0C0 ID\uB294 \uC720\uC9C0\uD588\uC9C0\uB9CC, \uB300\uCCB4 \uC544\uBC14\uD0C0\uB294 \uC5C5\uB85C\uB4DC\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.',
 });
 
 let controls = null;
 let exportControl = null;
+let controlsObserver = null;
+let userAvatarMacroRegistered = false;
+
+function logError(message, error) {
+    console.error(`[Persona Cards] ${message}`, error);
+}
+
+function withMacroEngineFlag(enabled, action) {
+    // MacrosParser writes to different stores depending on the active macro
+    // engine flag, so extension-scoped macros must be registered for both.
+    const previous = power_user.experimental_macro_engine;
+    power_user.experimental_macro_engine = enabled;
+    try {
+        return action();
+    } finally {
+        power_user.experimental_macro_engine = previous;
+    }
+}
+
+function hasRegisteredMacroInEitherEngine(key) {
+    return withMacroEngineFlag(false, () => MacrosParser.has(key))
+        || withMacroEngineFlag(true, () => MacrosParser.has(key));
+}
+
+function registerUserAvatarMacro() {
+    if (userAvatarMacroRegistered) return;
+    if (hasRegisteredMacroInEitherEngine(USER_AVATAR_MACRO)) {
+        console.warn(`[Persona Cards] Macro {{${USER_AVATAR_MACRO}}} is already registered; leaving it unchanged.`);
+        return;
+    }
+
+    try {
+        for (const enabled of [false, true]) {
+            withMacroEngineFlag(enabled, () => {
+                MacrosParser.registerMacro(
+                    USER_AVATAR_MACRO,
+                    () => user_avatar || '',
+                    'Current Persona avatar filename.',
+                );
+            });
+        }
+        userAvatarMacroRegistered = true;
+    } catch (error) {
+        for (const enabled of [false, true]) {
+            try {
+                withMacroEngineFlag(enabled, () => {
+                    if (MacrosParser.has(USER_AVATAR_MACRO)) {
+                        MacrosParser.unregisterMacro(USER_AVATAR_MACRO);
+                    }
+                });
+            } catch (rollbackError) {
+                logError('Macro registration rollback failed.', rollbackError);
+            }
+        }
+        throw error;
+    }
+}
+
+function unregisterUserAvatarMacro() {
+    if (!userAvatarMacroRegistered) return;
+
+    for (const enabled of [false, true]) {
+        withMacroEngineFlag(enabled, () => {
+            if (MacrosParser.has(USER_AVATAR_MACRO)) {
+                MacrosParser.unregisterMacro(USER_AVATAR_MACRO);
+            }
+        });
+    }
+
+    userAvatarMacroRegistered = false;
+}
 
 function strings() {
     return getCurrentLocale().startsWith('ko') ? STRINGS.ko : STRINGS.en;
@@ -144,7 +217,15 @@ function createButton(icon, title, action) {
     button.className = `menu_button fa-solid ${icon} persona-cards-button`;
     button.title = title;
     button.setAttribute('aria-label', title);
-    button.addEventListener('click', action);
+    button.addEventListener('click', async () => {
+        if (button.disabled) return;
+        button.disabled = true;
+        try {
+            await action();
+        } finally {
+            button.disabled = false;
+        }
+    });
     return button;
 }
 
@@ -153,11 +234,11 @@ function sanitizeFilename(name) {
     return cleaned || 'persona';
 }
 
-function createAvatarId(name) {
+function createAvatarId(name, avatarIds = []) {
     const asciiName = name.replace(/[^a-zA-Z0-9]/g, '');
     let timestamp = Date.now();
     let candidate = `${timestamp}-${asciiName}.png`;
-    while (Object.hasOwn(power_user.personas, candidate)) {
+    while (Object.hasOwn(power_user.personas, candidate) || avatarIds.includes(candidate)) {
         candidate = `${++timestamp}-${asciiName}.png`;
     }
     return candidate;
@@ -199,7 +280,7 @@ function getConnectionName(connection) {
 }
 
 function chatLabel() {
-    return getCurrentLocale().startsWith('ko') ? '채팅' : 'Chat';
+    return strings().chat;
 }
 
 function personaDocument(includeConnections) {
@@ -353,6 +434,11 @@ function createConnectionPreview(card) {
             createIcon(hasOpenChat ? 'fa-link' : 'fa-link-slash', hasOpenChat ? s.connectionFound : s.connectionMissing),
         );
         container.append(row);
+
+        const note = document.createElement('small');
+        note.className = 'text_muted';
+        note.textContent = s.chatLockImportNote ?? STRINGS.en.chatLockImportNote;
+        container.append(note);
     }
 
     if (!card.data.connections_included || !card.data.connections.length) return container;
@@ -530,7 +616,7 @@ async function applyImport(card, imageBlob) {
         const action = await chooseConflictAction(overwrite);
         if (action === POPUP_RESULT.CANCELLED) return;
         if (action === POPUP_RESULT.CUSTOM2) {
-            avatarId = createAvatarId(card.data.name);
+            avatarId = createAvatarId(card.data.name, avatarIds);
             overwrite = false;
             avatarExists = false;
         } else if (action !== POPUP_RESULT.CUSTOM1) {
@@ -687,12 +773,12 @@ async function importPersona(file) {
 }
 
 function createControls() {
-    if (controls?.isConnected && exportControl?.isConnected) return;
+    if (controls?.isConnected && exportControl?.isConnected) return true;
     const anchor = document.querySelector('#personas_restore');
     const exportAnchor = document.querySelector('#persona_delete_button');
     if (!anchor?.parentElement || !exportAnchor?.parentElement) {
         console.warn('[Persona Cards] Persona management controls were not found.');
-        return;
+        return false;
     }
 
     const s = strings();
@@ -707,7 +793,14 @@ function createControls() {
     fileInput.addEventListener('change', async () => {
         const file = fileInput.files?.[0];
         fileInput.value = '';
-        if (file) await importPersona(file);
+        if (!file) return;
+
+        importButton.disabled = true;
+        try {
+            await importPersona(file);
+        } finally {
+            importButton.disabled = false;
+        }
     });
 
     const importButton = createButton('fa-id-card-clip', s.importTitle, () => fileInput.click());
@@ -717,15 +810,51 @@ function createControls() {
     exportControl = createButton('fa-file-export', s.exportTitle, exportPersona);
     exportControl.id = EXPORT_CONTROL_ID;
     exportAnchor.before(exportControl);
+    controlsObserver?.disconnect();
+    controlsObserver = null;
+    return true;
+}
+
+function scheduleControlsRetry() {
+    if (createControls() || controlsObserver) return;
+
+    controlsObserver = new MutationObserver(() => createControls());
+    controlsObserver.observe(document.body, { childList: true, subtree: true });
+    setTimeout(() => {
+        controlsObserver?.disconnect();
+        controlsObserver = null;
+    }, 30_000);
 }
 
 export async function init() {
-    createControls();
+    try {
+        registerUserAvatarMacro();
+    } catch (error) {
+        logError('Macro registration failed.', error);
+    }
+
+    try {
+        scheduleControlsRetry();
+    } catch (error) {
+        logError('Control setup failed.', error);
+    }
 }
 
 export async function cleanup() {
-    controls?.remove();
-    controls = null;
-    exportControl?.remove();
-    exportControl = null;
+    try {
+        unregisterUserAvatarMacro();
+    } catch (error) {
+        logError('Macro cleanup failed.', error);
+    }
+
+    try {
+        controlsObserver?.disconnect();
+        controlsObserver = null;
+        controls?.remove();
+        controls = null;
+        exportControl?.remove();
+        exportControl = null;
+    } catch (error) {
+        logError('Control cleanup failed.', error);
+    }
 }
