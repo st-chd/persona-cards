@@ -170,8 +170,8 @@ function normalizeChatLock(value) {
 }
 
 /**
- * Creates a normalized v1 persona card document.
- * @param {object} data Persona data
+ * 정규화된 v1 페르소나 카드 문서를 생성한다.
+ * @param {object} data 페르소나 데이터
  * @returns {{spec:string, spec_version:string, data:object}}
  */
 export function createPersonaCard(data) {
@@ -183,8 +183,8 @@ export function createPersonaCard(data) {
 }
 
 /**
- * Validates and normalizes a persona card document.
- * @param {unknown} value Parsed card value
+ * 페르소나 카드 문서를 검증하고 정규화한다.
+ * @param {unknown} value 파싱된 카드 값
  * @returns {{spec:string, spec_version:string, data:{avatar_id:string,name:string,description:string,title:string,position:number,depth:number,role:number,lorebook:string,lorebook_included:boolean,connections_included:boolean,connections:Array<object>,chat_lock_included:boolean,chat_lock:{id:string,name:string}|null}}}
  */
 export function validatePersonaCard(value) {
@@ -203,8 +203,7 @@ export function validatePersonaCard(value) {
     const role = Number(source.role);
     const connectionsIncluded = value.spec_version !== '1.0' && source.connections_included === true;
     const chatLockIncluded = value.spec_version === '1.3' && source.chat_lock_included === true;
-    // Version 1.0 predates optional connection data. In 1.1 the existing
-    // connections flag represented the export checkbox, including lorebook data.
+    // 1.0에는 연결 정보 옵션이 없었다. 1.1의 connections 플래그는 로어북 포함 여부까지 나타내는 내보내기 체크박스였다.
     const lorebookIncluded = value.spec_version === '1.0'
         ? true
         : value.spec_version === '1.1'
@@ -213,8 +212,7 @@ export function validatePersonaCard(value) {
 
     return {
         spec: PERSONA_CARD_SPEC,
-        // Cards are migrated to the current writer version after legacy fields
-        // are interpreted using the input spec_version above.
+        // 위에서 입력 spec_version으로 레거시 필드를 해석한 뒤, 현재 작성기 버전으로 마이그레이션한다.
         spec_version: PERSONA_CARD_VERSION,
         data: {
             avatar_id: avatarId,
@@ -235,9 +233,9 @@ export function validatePersonaCard(value) {
 }
 
 /**
- * Adds persona metadata to a PNG, replacing any existing Persona Cards chunk.
- * @param {ArrayBuffer|Uint8Array} png PNG bytes
- * @param {object} card Persona card document
+ * PNG에 페르소나 메타데이터를 추가한다. 기존 Persona Cards 청크가 있으면 교체한다.
+ * @param {ArrayBuffer|Uint8Array} png PNG 바이트
+ * @param {object} card 페르소나 카드 문서
  * @returns {Uint8Array}
  */
 export function embedPersonaCardInPng(png, card) {
@@ -263,8 +261,8 @@ export function embedPersonaCardInPng(png, card) {
 }
 
 /**
- * Extracts and validates persona metadata from a PNG.
- * @param {ArrayBuffer|Uint8Array} png PNG bytes
+ * PNG에서 페르소나 메타데이터를 추출하고 검증한다.
+ * @param {ArrayBuffer|Uint8Array} png PNG 바이트
  * @returns {{spec:string, spec_version:string, data:object}}
  */
 export function extractPersonaCardFromPng(png) {
