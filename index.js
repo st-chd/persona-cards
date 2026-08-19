@@ -15,6 +15,7 @@ import {
 import { groups } from '../../../group-chats.js';
 import { getCurrentLocale } from '../../../i18n.js';
 import { MacrosParser } from '../../../macros.js';
+import { macros as macroSystem } from '../../../macros/macro-system.js';
 import { getUserAvatar, getUserAvatars, initPersona, setPersonaDescription, user_avatar } from '../../../personas.js';
 import { POPUP_RESULT, POPUP_TYPE, Popup } from '../../../popup.js';
 import { power_user } from '../../../power-user.js';
@@ -136,75 +137,74 @@ Object.assign(STRINGS.ko, {
 let controls = null;
 let exportControl = null;
 let controlsObserver = null;
-let userAvatarMacroRegistered = false;
+/** @type {'new'|'legacy'|null} {{user_avatar}} 매크로가 등록된 엔진 (없으면 null) */
+let userAvatarMacroEngine = null;
 
 function logError(message, error) {
     console.error(`[Persona Cards] ${message}`, error);
 }
 
-function withMacroEngineFlag(enabled, action) {
-    // MacrosParser writes to different stores depending on the active macro
-    // engine flag, so extension-scoped macros must be registered for both.
-    const previous = power_user.experimental_macro_engine;
-    power_user.experimental_macro_engine = enabled;
-    try {
-        return action();
-    } finally {
-        power_user.experimental_macro_engine = previous;
-    }
+/**
+ * 지금 활성화된 매크로 엔진. 이 엔진에만 등록하므로, 실험적 매크로 엔진
+ * 설정을 토글하면 재등록을 위해 새로고침이 필요하다.
+ * @returns {'new'|'legacy'}
+ */
+function activeMacroEngine() {
+    return power_user.experimental_macro_engine ? 'new' : 'legacy';
 }
 
-function hasRegisteredMacroInEitherEngine(key) {
-    return withMacroEngineFlag(false, () => MacrosParser.has(key))
-        || withMacroEngineFlag(true, () => MacrosParser.has(key));
+function hasUserAvatarMacro(engine) {
+    if (engine === 'new') {
+        return macroSystem.registry.hasMacro(USER_AVATAR_MACRO);
+    }
+
+    // MacrosParser.has()는 deprecated라 호출할 때마다 경고가 뜨므로, 대신 순회로 조용히 확인한다.
+    for (const macro of MacrosParser) {
+        if (macro.key === USER_AVATAR_MACRO) return true;
+    }
+
+    return false;
 }
 
 function registerUserAvatarMacro() {
-    if (userAvatarMacroRegistered) return;
-    if (hasRegisteredMacroInEitherEngine(USER_AVATAR_MACRO)) {
+    if (userAvatarMacroEngine) return;
+
+    const engine = activeMacroEngine();
+    if (hasUserAvatarMacro(engine)) {
         console.warn(`[Persona Cards] Macro {{${USER_AVATAR_MACRO}}} is already registered; leaving it unchanged.`);
         return;
     }
 
-    try {
-        for (const enabled of [false, true]) {
-            withMacroEngineFlag(enabled, () => {
-                MacrosParser.registerMacro(
-                    USER_AVATAR_MACRO,
-                    () => user_avatar || '',
-                    'Current Persona avatar filename.',
-                );
-            });
+    const description = 'Current Persona avatar filename.';
+
+    if (engine === 'new') {
+        const definition = macroSystem.registry.registerMacro(USER_AVATAR_MACRO, {
+            description,
+            handler: () => user_avatar || '',
+        });
+
+        // 신규 레지스트리는 예외를 던지지 않고, 로그만 남긴 뒤 null을 반환한다.
+        if (!definition) {
+            throw new Error(`Macro {{${USER_AVATAR_MACRO}}} could not be registered.`);
         }
-        userAvatarMacroRegistered = true;
-    } catch (error) {
-        for (const enabled of [false, true]) {
-            try {
-                withMacroEngineFlag(enabled, () => {
-                    if (MacrosParser.has(USER_AVATAR_MACRO)) {
-                        MacrosParser.unregisterMacro(USER_AVATAR_MACRO);
-                    }
-                });
-            } catch (rollbackError) {
-                logError('Macro registration rollback failed.', rollbackError);
-            }
-        }
-        throw error;
+    } else {
+        MacrosParser.registerMacro(USER_AVATAR_MACRO, () => user_avatar || '', description);
     }
+
+    userAvatarMacroEngine = engine;
 }
 
 function unregisterUserAvatarMacro() {
-    if (!userAvatarMacroRegistered) return;
+    if (!userAvatarMacroEngine) return;
 
-    for (const enabled of [false, true]) {
-        withMacroEngineFlag(enabled, () => {
-            if (MacrosParser.has(USER_AVATAR_MACRO)) {
-                MacrosParser.unregisterMacro(USER_AVATAR_MACRO);
-            }
-        });
+    // 등록 이후 플래그가 바뀌었을 수 있으니, 실제로 등록됐던 엔진에서 해제한다.
+    if (userAvatarMacroEngine === 'new') {
+        macroSystem.registry.unregisterMacro(USER_AVATAR_MACRO);
+    } else {
+        MacrosParser.unregisterMacro(USER_AVATAR_MACRO);
     }
 
-    userAvatarMacroRegistered = false;
+    userAvatarMacroEngine = null;
 }
 
 function strings() {
