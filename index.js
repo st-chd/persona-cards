@@ -16,7 +16,7 @@ import { groups } from '../../../group-chats.js';
 import { getCurrentLocale } from '../../../i18n.js';
 import { MacrosParser } from '../../../macros.js';
 import { macros as macroSystem } from '../../../macros/macro-system.js';
-import { getUserAvatar, getUserAvatars, initPersona, setPersonaDescription, user_avatar } from '../../../personas.js';
+import { getUserAvatar, getUserAvatars, initPersona, setPersonaDescription, setUserAvatar, user_avatar } from '../../../personas.js';
 import { POPUP_RESULT, POPUP_TYPE, Popup } from '../../../popup.js';
 import { power_user } from '../../../power-user.js';
 import { world_names } from '../../../world-info.js';
@@ -59,6 +59,10 @@ const STRINGS = {
         cancel: 'Cancel',
         conflictTitle: 'Persona already exists',
         conflictText: 'A persona with the same internal ID already exists. Choose how to continue.',
+        overwriteClearsNote: 'Overwriting clears the lorebook and connections that are not in this card.',
+        chatLockReplaceTitle: 'Replace chat lock',
+        chatLockReplaceText: name => `This chat is already locked to "${name}". Lock it to the imported persona instead?`,
+        serverFailed: 'The server request failed. Try again later.',
         avatarConflictText: 'An unassigned avatar with the same internal ID already exists. Overwrite it or create a copy.',
         overwrite: 'Overwrite',
         copy: 'Create copy',
@@ -78,7 +82,6 @@ const STRINGS = {
         exportPngRequiresPng: 'PNG export requires a PNG avatar. Use JSON export for this persona, or convert the avatar to PNG first.',
         chatLockSkipped: 'The imported chat lock was not applied because no chat is currently open.',
         chatLockImportNote: 'On import, this chat lock is applied to the currently open chat.',
-        avatarPlaceholderSkipped: 'No avatar image was embedded. The original non-PNG avatar ID was preserved, but no placeholder avatar was uploaded.',
         loreMissingNew: name => `Lorebook "${name}" was not found (importing without a connection).`,
         loreMissingOverwrite: name => `Lorebook "${name}" was not found (keeping the existing connection).`,
     },
@@ -106,6 +109,10 @@ const STRINGS = {
         cancel: '취소',
         conflictTitle: '같은 페르소나가 이미 있음',
         conflictText: '동일한 내부 ID를 가진 페르소나가 있습니다. 처리 방법을 선택하세요.',
+        overwriteClearsNote: '덮어쓰면 이 카드에 없는 로어북·연결 정보는 비워집니다.',
+        chatLockReplaceTitle: '채팅 잠금 교체',
+        chatLockReplaceText: name => `이 채팅은 이미 "${name}"에 잠겨 있습니다. 가져온 페르소나로 교체할까요?`,
+        serverFailed: '서버 요청에 실패했습니다. 잠시 후 다시 시도하세요.',
         avatarConflictText: '동일한 내부 ID를 가진 미등록 아바타가 있습니다. 덮어쓰거나 복사본을 생성하세요.',
         overwrite: '덮어쓰기',
         copy: '복사본 생성',
@@ -131,7 +138,6 @@ Object.assign(STRINGS.ko, {
     exportPngRequiresPng: '\uC544\uBC14\uD0C0\uAC00 PNG\uC77C \uB54C\uB9CC PNG\uB85C \uB0B4\uBCF4\uB0BC \uC218 \uC788\uC2B5\uB2C8\uB2E4. JSON\uC73C\uB85C \uB0B4\uBCF4\uB0B4\uAC70\uB098 \uC544\uBC14\uD0C0\uB97C PNG\uB85C \uBCC0\uD658\uD574 \uC8FC\uC138\uC694.',
     chatLockSkipped: '\uD604\uC7AC \uC5F4\uB9B0 \uCC44\uD305\uC774 \uC5C6\uC5B4 \uAC00\uC838\uC628 \uCC44\uD305 \uC7A0\uAE08\uC744 \uC801\uC6A9\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.',
     chatLockImportNote: '\uAC00\uC838\uC624\uAE30 \uC2DC \uC774 \uCC44\uD305 \uC7A0\uAE08\uC740 \uD604\uC7AC \uC5F4\uB824 \uC788\uB294 \uCC44\uD305\uC5D0 \uC801\uC6A9\uB429\uB2C8\uB2E4.',
-    avatarPlaceholderSkipped: '\uD3EC\uD568\uB41C \uC544\uBC14\uD0C0 \uC774\uBBF8\uC9C0\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4. \uAE30\uC874 non-PNG \uC544\uBC14\uD0C0 ID\uB294 \uC720\uC9C0\uD588\uC9C0\uB9CC, \uB300\uCCB4 \uC544\uBC14\uD0C0\uB294 \uC5C5\uB85C\uB4DC\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.',
 });
 
 let controls = null;
@@ -197,7 +203,8 @@ function registerUserAvatarMacro() {
 function unregisterUserAvatarMacro() {
     if (!userAvatarMacroEngine) return;
 
-    // 등록 이후 플래그가 바뀌었을 수 있으니, 실제로 등록됐던 엔진에서 해제한다.
+    // MacrosParser.unregisterMacro()는 호출 시점의 엔진 플래그를 따른다. 등록 후 플래그를 바꿨다면
+    // legacy 등록이 메모리에 남을 수 있으며, 새로고침해야 정리된다.
     if (userAvatarMacroEngine === 'new') {
         macroSystem.registry.unregisterMacro(USER_AVATAR_MACRO);
     } else {
@@ -214,9 +221,13 @@ function strings() {
 function createButton(icon, title, action) {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = `menu_button fa-solid ${icon} persona-cards-button`;
+    button.className = 'menu_button persona-cards-button';
     button.title = title;
     button.setAttribute('aria-label', title);
+    // 테마가 button의 font-family를 !important로 고정하면 버튼 자체에 붙인 아이콘 글꼴이 덮어써진다.
+    const iconElement = document.createElement('i');
+    iconElement.className = `fa-solid ${icon}`;
+    button.append(iconElement);
     button.addEventListener('click', async () => {
         if (button.disabled) return;
         button.disabled = true;
@@ -396,7 +407,7 @@ function resolveImportedConnections(card) {
         const connection = { type: imported.type, id: imported.id };
         (found ? resolved : unresolved).push({
             connection,
-            name: imported.name || getConnectionName(connection) || imported.id,
+            name: (found ? getConnectionName(connection) : '') || imported.name || imported.id,
         });
     }
     return { resolved, unresolved };
@@ -419,14 +430,16 @@ function createConnectionPreview(card) {
     container.className = 'persona-cards-connections';
 
     if (card.data.chat_lock_included) {
-        const hasOpenChat = !!getCurrentChatId();
+        const currentChatId = getCurrentChatId();
+        const hasOpenChat = !!currentChatId;
         const row = document.createElement('div');
         row.className = 'persona-cards-connection';
         row.classList.toggle('persona-cards-connection-missing', !hasOpenChat);
 
+        // 잠금은 내보낸 쪽 채팅이 아니라 지금 열린 채팅에 적용되므로, 적용 대상을 보여 준다.
         const name = document.createElement('span');
         name.className = 'persona-cards-connection-name';
-        name.textContent = card.data.chat_lock?.name || card.data.chat_lock?.id || chatLabel();
+        name.textContent = hasOpenChat ? String(currentChatId) : chatLabel();
 
         row.append(
             createIcon('fa-message', chatLabel()),
@@ -521,9 +534,11 @@ async function confirmPreview(card, format, imageUrl) {
     return await popup.show() === POPUP_RESULT.AFFIRMATIVE;
 }
 
-async function chooseConflictAction(hasPersona) {
+async function chooseConflictAction(hasPersona, clearsMissing) {
     const s = strings();
-    return await Popup.show.text(s.conflictTitle, hasPersona ? s.conflictText : s.avatarConflictText, {
+    let text = hasPersona ? s.conflictText : s.avatarConflictText;
+    if (hasPersona && clearsMissing) text += `<br><small>${s.overwriteClearsNote}</small>`;
+    return await Popup.show.text(s.conflictTitle, text, {
         okButton: false,
         cancelButton: s.cancel,
         customButtons: [
@@ -545,6 +560,18 @@ async function chooseConnectionAction() {
     });
 }
 
+async function confirmChatLockReplace(lockedName) {
+    const s = strings();
+    const content = document.createElement('div');
+    const title = document.createElement('h3');
+    title.textContent = s.chatLockReplaceTitle;
+    const text = document.createElement('p');
+    text.textContent = s.chatLockReplaceText(lockedName);
+    content.append(title, text);
+    const popup = new Popup(content, POPUP_TYPE.CONFIRM, null, { okButton: s.replaceConnections, cancelButton: s.keepConnections });
+    return await popup.show() === POPUP_RESULT.AFFIRMATIVE;
+}
+
 async function uploadAvatar(blob, avatarId) {
     const type = blob.type || 'image/png';
     const extension = avatarExtension(avatarId) || (type === 'image/webp' ? '.webp' : type === 'image/gif' ? '.gif' : type === 'image/jpeg' ? '.jpg' : '.png');
@@ -553,19 +580,27 @@ async function uploadAvatar(blob, avatarId) {
     form.append('avatar', file);
     form.append('overwrite_name', avatarId);
 
-    const response = await fetch('/api/avatars/upload', {
-        method: 'POST',
-        headers: getRequestHeaders({ omitContentType: true }),
-        cache: 'no-cache',
-        body: form,
-    });
+    let response;
+    try {
+        response = await fetch('/api/avatars/upload', {
+            method: 'POST',
+            headers: getRequestHeaders({ omitContentType: true }),
+            cache: 'no-cache',
+            body: form,
+        });
+    } catch (error) {
+        console.error('[Persona Cards] Avatar upload request failed.', error);
+        throw new Error('SERVER_FAILED');
+    }
     if (!response.ok) {
         const responseBody = (await response.text().catch(() => '')).trim().slice(0, 300);
-        throw new Error(`Avatar upload failed: ${response.status}${responseBody ? ` ${responseBody}` : ''}`);
+        console.error(`[Persona Cards] Avatar upload failed: ${response.status}${responseBody ? ` ${responseBody}` : ''}`);
+        throw new Error('SERVER_FAILED');
     }
 
-    await fetch(getUserAvatar(avatarId), { cache: 'reload' });
-    await fetch(getThumbnailUrl('persona', avatarId), { cache: 'reload' });
+    // 업로드는 이미 끝났으므로, 캐시 갱신이 실패해도 가져오기를 중단하지 않는다.
+    await fetch(getUserAvatar(avatarId), { cache: 'reload' }).catch(() => {});
+    await fetch(getThumbnailUrl('persona', avatarId), { cache: 'reload' }).catch(() => {});
 }
 
 async function defaultAvatarBlob() {
@@ -574,24 +609,15 @@ async function defaultAvatarBlob() {
     return await response.blob();
 }
 
+// 서버는 확장자와 관계없이 PNG로 다시 인코딩해 저장한다. 페르소나 목록은 아바타 파일 기준이라
+// 파일을 만들지 못하면 보이지 않는 페르소나가 생기므로, 실패는 그대로 던진다.
 async function uploadDefaultAvatar(avatarId) {
-    if (avatarExtension(avatarId) !== '.png') {
-        const s = strings();
-        console.warn(`[Persona Cards] Skipping placeholder upload for non-PNG avatar ID: ${avatarId}`);
-        toastr.warning(s.avatarPlaceholderSkipped ?? STRINGS.en.avatarPlaceholderSkipped, 'Persona Cards', { timeOut: 8000 });
-        return;
-    }
-
     try {
         await uploadAvatar(await defaultAvatarBlob(), avatarId);
     } catch (error) {
         console.warn('[Persona Cards] Default avatar upload failed; using bundled placeholder avatar.', error);
-        try {
-            const bytes = Uint8Array.from(atob(FALLBACK_AVATAR_PNG), char => char.charCodeAt(0));
-            await uploadAvatar(new Blob([bytes], { type: 'image/png' }), avatarId);
-        } catch (fallbackError) {
-            console.warn('[Persona Cards] Bundled placeholder avatar upload failed; continuing with persona metadata only.', fallbackError);
-        }
+        const bytes = Uint8Array.from(atob(FALLBACK_AVATAR_PNG), char => char.charCodeAt(0));
+        await uploadAvatar(new Blob([bytes], { type: 'image/png' }), avatarId);
     }
 }
 
@@ -609,11 +635,14 @@ async function applyImport(card, imageBlob) {
     const s = strings();
     let avatarId = safeImportedAvatarId(card.data.avatar_id, card.data.name);
     let overwrite = Object.hasOwn(power_user.personas, avatarId);
-    const avatarIds = await getUserAvatars(false);
+    const avatarIds = await getUserAvatars(false).catch(() => null);
+    if (!Array.isArray(avatarIds)) throw new Error('SERVER_FAILED');
     let avatarExists = avatarIds.includes(avatarId);
 
     if (overwrite || avatarExists) {
-        const action = await chooseConflictAction(overwrite);
+        // 연결 처리 팝업이 이어서 뜨면 거기서 유지/교체를 고르므로, 비워진다는 안내는 그 팝업이 없을 때만 한다.
+        const connectionPromptFollows = card.data.connections_included || card.data.chat_lock_included;
+        const action = await chooseConflictAction(overwrite, !connectionPromptFollows);
         if (action === POPUP_RESULT.CANCELLED) return;
         if (action === POPUP_RESULT.CUSTOM2) {
             avatarId = createAvatarId(card.data.name, avatarIds);
@@ -625,7 +654,7 @@ async function applyImport(card, imageBlob) {
     }
 
     const existingDescriptor = power_user.persona_descriptions[avatarId] ?? {};
-    const lorebook = card.data.lorebook_included
+    let lorebook = card.data.lorebook_included
         ? resolveLorebook(card.data.lorebook, overwrite, existingDescriptor)
         : { value: '', warning: '' };
     const connectionResolution = resolveImportedConnections(card);
@@ -641,7 +670,10 @@ async function applyImport(card, imageBlob) {
             if (connectionAction === POPUP_RESULT.CUSTOM2) {
                 finalConnections = importedConnections;
                 applyChatLock = card.data.chat_lock_included;
-            } else if (connectionAction !== POPUP_RESULT.CUSTOM1) {
+            } else if (connectionAction === POPUP_RESULT.CUSTOM1) {
+                // 로어북도 연결 설정에 포함되므로 함께 유지한다.
+                lorebook = { value: existingDescriptor.lorebook ?? '', warning: '' };
+            } else {
                 return;
             }
         } else {
@@ -705,16 +737,27 @@ async function applyImport(card, imageBlob) {
         });
     }
 
+    let chatLocked = false;
     if (applyChatLock) {
-        if (getCurrentChatId()) {
-            chat_metadata.persona = avatarId;
-            await saveMetadata();
-        } else {
+        if (!getCurrentChatId()) {
             toastr.warning(s.chatLockSkipped ?? STRINGS.en.chatLockSkipped, 'Persona Cards', { timeOut: 8000 });
+        } else {
+            const lockedId = chat_metadata.persona;
+            const shouldReplace = !lockedId || lockedId === avatarId
+                || await confirmChatLockReplace(power_user.personas[lockedId] || lockedId);
+            if (shouldReplace) {
+                chat_metadata.persona = avatarId;
+                await saveMetadata();
+                chatLocked = true;
+            }
         }
     }
 
     await getUserAvatars(true, avatarId);
+    // 잠금만 걸고 전환하지 않으면 다음에 채팅을 열 때 ST가 페르소나를 바꾼다. 지금 맞춰 둔다.
+    if (chatLocked && user_avatar !== avatarId) {
+        await setUserAvatar(avatarId, { toastPersonaNameChange: false });
+    }
     toastr.success(overwrite ? s.overwritten : s.imported, 'Persona Cards');
     if (lorebook.warning) toastr.warning(lorebook.warning, 'Persona Cards', { timeOut: 8000 });
     if (connectionResolution.unresolved.length) {
@@ -744,6 +787,7 @@ function showImportError(error) {
     if (code === 'NO_PERSONA_DATA') toastr.warning(s.noPngData, 'Persona Cards');
     else if (code === 'UNSUPPORTED_VERSION') toastr.warning(s.unsupportedVersion, 'Persona Cards');
     else if (code === 'FILE_TOO_LARGE' || code === 'METADATA_TOO_LARGE') toastr.warning(s.fileTooLarge, 'Persona Cards');
+    else if (code === 'SERVER_FAILED') toastr.error(s.serverFailed, 'Persona Cards');
     else toastr.warning(s.invalidFile, 'Persona Cards');
 }
 

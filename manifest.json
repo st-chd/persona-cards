@@ -6,11 +6,10 @@
     "js": "index.js",
     "css": "style.css",
     "author": "CH",
-    "version": "1.6.1",
+    "version": "1.6.2",
     "homePage": "https://github.com/st-chd/persona-cards",
     "hooks": {
         "activate": "init",
-        "clean": "cleanup",
         "delete": "cleanup"
     }
 }
