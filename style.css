@@ -6,6 +6,11 @@
     min-width: 2.25em;
 }
 
+/* 아이콘을 버튼 안 <i>로 넣었을 때 생기는 줄 높이 여백을 없애 이웃 아이콘 버튼과 높이를 맞춘다. */
+.persona-cards-button > i {
+    display: flex;
+}
+
 #persona-cards-export {
     min-width: unset;
 }

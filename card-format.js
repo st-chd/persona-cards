@@ -6,6 +6,8 @@ const SUPPORTED_VERSIONS = new Set(['1.0', '1.1', '1.2', '1.3']);
 const PNG_KEYWORD = 'st_persona';
 const PNG_SIGNATURE = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 const MAX_METADATA_BYTES = 1024 * 1024;
+// tEXt 청크에는 JSON이 base64로 들어가므로, JSON 제한(MAX_METADATA_BYTES)보다 약 4/3배 크다.
+const MAX_TEXT_CHUNK_BYTES = PNG_KEYWORD.length + 1 + Math.ceil(MAX_METADATA_BYTES / 3) * 4;
 const VALID_POSITIONS = new Set([0, 1, 2, 3, 4, 9]);
 const VALID_ROLES = new Set([0, 1, 2]);
 
@@ -127,7 +129,7 @@ function decodeTextChunk(chunk) {
 
     const keyword = bytesToString(chunk.data.subarray(0, separator));
     if (keyword !== PNG_KEYWORD) return null;
-    if (chunk.data.length > MAX_METADATA_BYTES) throw new Error('METADATA_TOO_LARGE');
+    if (chunk.data.length > MAX_TEXT_CHUNK_BYTES) throw new Error('METADATA_TOO_LARGE');
 
     const actualCrc = crc32(concatBytes([chunk.typeBytes, chunk.data]));
     if (actualCrc !== chunk.storedCrc) throw new Error('INVALID_METADATA');
@@ -269,14 +271,20 @@ export function extractPersonaCardFromPng(png) {
     const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
     const chunks = parseChunks(bytes);
     let json = null;
+    let chunkError = null;
 
     for (const chunk of chunks) {
         if (chunk.type !== 'tEXt') continue;
-        const decoded = safeDecodeTextChunk(chunk);
-        if (decoded !== null) json = decoded;
+        try {
+            const decoded = decodeTextChunk(chunk);
+            if (decoded !== null) json = decoded;
+        } catch (error) {
+            chunkError = error;
+        }
     }
 
-    if (json === null) throw new Error('NO_PERSONA_DATA');
+    // 페르소나 청크는 있었지만 읽지 못했다면 '데이터 없음' 대신 실제 원인을 알린다.
+    if (json === null) throw chunkError ?? new Error('NO_PERSONA_DATA');
 
     try {
         return validatePersonaCard(JSON.parse(json));
