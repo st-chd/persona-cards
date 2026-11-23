@@ -5,6 +5,14 @@ SillyTavern의 페르소나를 하나씩 저장하고 불러올 수 있는 확�
 
 전체 페르소나를 한꺼번에 백업하는 대신, 원하는 페르소나만 PNG 또는 JSON 파일로 내보내고 다른 SillyTavern 환경에서 다시 가져올 수 있습니다.
 
+## 미리 보기
+
+|내보내기 및 불러 오기|불러 오기|
+|---|---|
+|<img src="https://raw.githubusercontent.com/st-chd/chd-asset/refs/heads/main/Asset/personacard-1.png">|<img src="https://raw.githubusercontent.com/st-chd/chd-asset/refs/heads/main/Asset/personacard-3.png"> |
+|내보내기|덮어 쓰기|
+|<img src="https://raw.githubusercontent.com/st-chd/chd-asset/refs/heads/main/Asset/personacard-2.png">|<img src="https://raw.githubusercontent.com/st-chd/chd-asset/refs/heads/main/Asset/personacard-4.png"> |
+
 ## 주요 기능
 
 - 페르소나를 PNG 또는 JSON 파일로 개별 저장
